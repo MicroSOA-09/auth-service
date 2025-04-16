@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 
@@ -62,16 +63,44 @@ func (repo *UserRepo) GetUserByUsername(ctx context.Context, username string) (*
 }
 
 func (repo *UserRepo) GetUserByIds(ctx context.Context, ids []primitive.ObjectID) ([]model.User, error) {
-	users := []model.User{}
-	cursor, err := repo.users.Find(ctx, bson.M{"is_active": true, "_id": bson.M{"$in": ids}})
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	// Ukloni duplikate
+	uniqueIDs := make(map[primitive.ObjectID]struct{})
+	for _, id := range ids {
+		uniqueIDs[id] = struct{}{}
+	}
+	idList := make([]primitive.ObjectID, 0, len(uniqueIDs))
+	for id := range uniqueIDs {
+		idList = append(idList, id)
+	}
+	fmt.Printf("Unique IDs: %v\n", idList)
+
+	// Upit
+	cursor, err := repo.users.Find(ctx, bson.M{
+		"_id": bson.M{"$in": idList},
+	})
 	if err != nil {
+		fmt.Printf("Find error: %v\n", err)
 		return nil, err
 	}
 	defer cursor.Close(ctx)
 
+	// Dohvati korisnike
+	var users []model.User
 	if err := cursor.All(ctx, &users); err != nil {
+		fmt.Printf("Cursor error: %v\n", err)
 		return nil, err
 	}
+
+	// Detaljan ispis
+	fmt.Printf("Found %d users:\n", len(users))
+	for i, user := range users {
+		fmt.Printf("User %d: ID=%s, Username=%s\n", i+1, user.ID.Hex(), user.Username)
+	}
+
 	return users, nil
 }
 

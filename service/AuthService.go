@@ -70,7 +70,7 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (str
 		return "", "", err
 	}
 
-	return token, user.ID.String(), nil
+	return token, user.ID.Hex(), nil
 }
 
 func (s *AuthService) ValidateJWT(tokenString string) (string, string, string, error) {

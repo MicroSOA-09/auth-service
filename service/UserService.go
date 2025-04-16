@@ -52,7 +52,7 @@ func (service *UserService) GetUsernames(ctx context.Context, ids []string) ([]m
 		}
 		objectIds = append(objectIds, oid)
 	}
-
+	println(objectIds)
 	// Poziv repozitorijuma
 	users, err := service.UserRepo.GetUserByIds(ctx, objectIds)
 	if err != nil {
