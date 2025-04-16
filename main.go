@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -11,20 +12,24 @@ import (
 	"github.com/MicroSOA-09/auth-service/handler"
 	"github.com/MicroSOA-09/auth-service/repository"
 	"github.com/MicroSOA-09/auth-service/service"
-	gorillaHandlers "github.com/gorilla/handlers"
+
+	// gorillaHandlers "github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
 )
 
 func main() {
-	// Učitaj .env fajl
-	if err := godotenv.Load(); err != nil {
-		log.Fatal("Error loading .env file:", err)
+
+	// Load .env file
+	// Load .env file
+	err := godotenv.Load()
+	if err != nil {
+		fmt.Println("Warning: Could not load .env file, using defaults:", err)
 	}
 
 	port := os.Getenv("PORT")
 	if len(port) == 0 {
-		port = "8080"
+		port = "80"
 	}
 
 	timeoutContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -59,19 +64,22 @@ func main() {
 	authRouter := router.Methods(http.MethodPost).Subrouter()
 	authRouter.HandleFunc("/api/auth/register", authHandler.Register)
 	authRouter.HandleFunc("/api/auth/login", authHandler.Login)
+	authRouter.HandleFunc("/api/auth/jwt", authHandler.ValidateJWT)
 	// confirm mail
 	// password reset
 
 	// USER ROUTES
 	getRouter := router.Methods(http.MethodGet).Subrouter()
 	getRouter.HandleFunc("/api/user", userHandler.GetAll)
+	getRouter.HandleFunc("/api/user/{id}", userHandler.GetUser)
+	getRouter.HandleFunc("/api/user/getUsernames/{ids}", userHandler.GetUsernames)
 
-	cors := gorillaHandlers.CORS(gorillaHandlers.AllowedOrigins([]string{"*"}))
+	// cors := gorillaHandlers.CORS(gorillaHandlers.AllowedOrigins([]string{"*"}))
 
 	//Initialize the server
 	server := http.Server{
 		Addr:         ":" + port,
-		Handler:      cors(router),
+		Handler:      router,
 		IdleTimeout:  120 * time.Second,
 		ReadTimeout:  1 * time.Second,
 		WriteTimeout: 1 * time.Second,

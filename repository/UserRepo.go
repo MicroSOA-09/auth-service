@@ -42,6 +42,39 @@ func (repo *UserRepo) GetAll(ctx context.Context) ([]model.User, error) {
 	return users, nil
 }
 
+func (repo *UserRepo) GetUser(ctx context.Context, id primitive.ObjectID) (*model.User, error) {
+	user := model.User{}
+	err := repo.users.FindOne(ctx, bson.M{"is_active": true, "_id": id}).Decode(&user)
+	if err != nil {
+		repo.logger.Printf("No user with that id %v", id)
+		return nil, ErrUserNotFound
+	}
+	return &user, nil
+}
+
+func (repo *UserRepo) GetUserByUsername(ctx context.Context, username string) (*model.User, error) {
+	user := model.User{}
+	err := repo.users.FindOne(ctx, bson.M{"is_active": true, "username": username}).Decode(&user)
+	if err != nil {
+		return nil, ErrUserNotFound
+	}
+	return &user, nil
+}
+
+func (repo *UserRepo) GetUserByIds(ctx context.Context, ids []primitive.ObjectID) ([]model.User, error) {
+	users := []model.User{}
+	cursor, err := repo.users.Find(ctx, bson.M{"is_active": true, "_id": bson.M{"$in": ids}})
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	if err := cursor.All(ctx, &users); err != nil {
+		return nil, err
+	}
+	return users, nil
+}
+
 func New(ctx context.Context, logger *log.Logger) (*UserRepo, error) {
 	dbURI := os.Getenv("MONGO_DB_URI")
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI(dbURI))
@@ -137,18 +170,4 @@ func (r *UserRepo) CreateUser(ctx context.Context, user *model.User, person *mod
 	})
 
 	return err
-}
-
-func (r *UserRepo) GetUserByUsername(ctx context.Context, username string) (*model.User, error) {
-	user := &model.User{}
-	err := r.users.FindOne(ctx, bson.M{"username": username}).Decode(user)
-	if err == mongo.ErrNoDocuments {
-		r.logger.Printf("User not found: %s", username)
-		return nil, ErrUserNotFound
-	}
-	if err != nil {
-		r.logger.Printf("Error finding user: %v", err)
-		return nil, err
-	}
-	return user, nil
 }

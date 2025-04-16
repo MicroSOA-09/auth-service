@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/MicroSOA-09/auth-service/model"
@@ -33,6 +34,7 @@ func (h *AuthHandler) Register(rw http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		h.logger.Printf("Register endpoint - invalid input")
 		http.Error(rw, "Invalid input", http.StatusBadRequest)
 		return
 	}
@@ -45,6 +47,7 @@ func (h *AuthHandler) Register(rw http.ResponseWriter, r *http.Request) {
 	} else if input.Role == "Tourist" || input.Role == "tourist" {
 		user.Role = model.RoleTourist
 	} else {
+		h.logger.Printf("Register endpoint - invalid ROLE input")
 		http.Error(rw, "Invalid role input", http.StatusBadRequest)
 		return
 	}
@@ -62,10 +65,12 @@ func (h *AuthHandler) Register(rw http.ResponseWriter, r *http.Request) {
 	token, err := h.authService.Register(ctx, user, person, input.Password)
 
 	if err == repository.ErrDuplicateUser {
+		h.logger.Printf("Register endpoint - username/email already exists")
 		http.Error(rw, "Username or email already exists", http.StatusConflict)
 		return
 	}
 	if err != nil {
+		h.logger.Printf("Register endpoint - Failed to register")
 		http.Error(rw, "Failed to register", http.StatusInternalServerError)
 		return
 	}
@@ -91,6 +96,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		h.logger.Printf("Login endpoint - invalid input")
 		http.Error(w, "Invalid input", http.StatusBadRequest)
 		return
 	}
@@ -98,22 +104,68 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	token, err := h.authService.Login(ctx, input.Username, input.Password)
+	token, userId, err := h.authService.Login(ctx, input.Username, input.Password)
 	if err == repository.ErrUserNotFound || err == repository.ErrInvalidCredentials {
+		h.logger.Printf("Login endpoint - invalid credentials")
 		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 		return
 	}
 	if err == repository.ErrUserNotActive {
+		h.logger.Printf("Login endpoint - account not verified")
 		http.Error(w, "Account not verified", http.StatusForbidden)
 		return
 	}
 	if err != nil {
+		h.logger.Printf("Login endpoint - failed to login %v", err)
 		http.Error(w, "Failed to login", http.StatusInternalServerError)
 		return
 	}
 
+	response := struct {
+		ID          string `json:"id"`
+		AccessToken string `json:"accessToken"`
+	}{
+		ID:          userId,
+		AccessToken: token,
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"token": token})
+	json.NewEncoder(w).Encode(response)
+}
+
+func (h *AuthHandler) ValidateJWT(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		h.writeResponse(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		h.logger.Printf("missing Authorization header")
+		h.writeResponse(w, http.StatusUnauthorized, map[string]string{"error": "missing Authorization header"})
+		return
+	}
+
+	parts := strings.Split(authHeader, " ")
+	if len(parts) != 2 || parts[0] != "Bearer" {
+		h.logger.Printf("invalid Authorization format")
+		h.writeResponse(w, http.StatusUnauthorized, map[string]string{"error": "invalid Authorization format"})
+		return
+	}
+
+	userID, username, role, err := h.authService.ValidateJWT(parts[1])
+	if err != nil {
+		h.logger.Printf("JWT validation failed: %v", err)
+		h.writeResponse(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
+		return
+	}
+
+	response := map[string]string{
+		"userID":   userID,
+		"username": username,
+		"role":     role,
+	}
+	h.writeResponse(w, http.StatusOK, response)
 }
 
 func (a *AuthHandler) MiddlewareContentTypeSet(next http.Handler) http.Handler {
@@ -124,4 +176,12 @@ func (a *AuthHandler) MiddlewareContentTypeSet(next http.Handler) http.Handler {
 
 		next.ServeHTTP(rw, h)
 	})
+}
+
+func (h *AuthHandler) writeResponse(w http.ResponseWriter, status int, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		h.logger.Printf("Failed to write response: %v", err)
+	}
 }
